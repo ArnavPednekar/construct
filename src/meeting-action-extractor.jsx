@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useGoogleLogin } from "@react-oauth/google";
 
 // ─── OpenRouter API key (from your server.js) ─────────────────────────
-const OPENROUTER_API_KEY = "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";
+const OPENROUTER_API_KEY = "";
 const OPENROUTER_MODEL = "google/gemma-3-27b-it:free";
 
 // ─── Call OpenRouter directly (replaces localhost:5000) ───────────────
