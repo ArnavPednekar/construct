@@ -1,5 +1,68 @@
 import { useState, useEffect, useRef } from "react";
 import { useGoogleLogin } from "@react-oauth/google";
+
+// ─── OpenRouter API key (from your server.js) ─────────────────────────
+const OPENROUTER_API_KEY = "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";
+const OPENROUTER_MODEL = "google/gemma-3-27b-it:free";
+
+// ─── Call OpenRouter directly (replaces localhost:5000) ───────────────
+async function extractTasksWithAI(text) {
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": window.location.origin,
+      "X-Title": "Meeting Action Extractor",
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      messages: [
+        {
+          role: "user",
+          content: `Extract all action items, tasks, and deadlines from the following meeting notes.
+
+Return ONLY a valid JSON array — no markdown, no explanation, no backticks.
+
+Each item must have:
+- "task": what needs to be done (string)
+- "owner": person responsible (string, or "Unassigned" if unknown)
+- "deadline": due date or timeframe (string, or "No deadline" if not mentioned)
+- "priority": "high", "medium", or "low" based on urgency language
+
+Example:
+[
+  {
+    "task": "Send revised proposal to client",
+    "owner": "Sarah",
+    "deadline": "Friday",
+    "priority": "high"
+  }
+]
+
+Meeting notes:
+${text}`,
+        },
+      ],
+    }),
+  });
+
+  const data = await response.json();
+  console.log("OpenRouter response:", data);
+
+  const raw = data.choices?.[0]?.message?.content || "";
+
+  try {
+    const clean = raw.replace(/```json|```/gi, "").trim();
+    const match = clean.match(/\[[\s\S]*\]/);
+    if (match) return JSON.parse(match[0]);
+  } catch (e) {
+    console.error("JSON parse failed:", e, "Raw:", raw);
+  }
+
+  return [];
+}
+
 // ─── Palette & constants ───────────────────────────────────────────────
 const COLORS = {
   purple: { bg: "#EEEDFE", text: "#3C3489", border: "#AFA9EC" },
@@ -10,39 +73,7 @@ const COLORS = {
   green:  { bg: "#EAF3DE", text: "#27500A", border: "#97C459" },
 };
 
-const AVATAR_COLORS = ["purple","teal","amber","coral","blue","green"];
-
-
-// ─── Simulated API calls ───────────────────────────────────────────────
-async function callClaude(messages, system) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
-      system,
-      messages,
-    }),
-  });
-  const data = await res.json();
-  return data.content?.map(b => b.text || "").join("") || "";
-}
-
-async function extractActionItems(notes, meetingTitle, meetingDate) {
-  const system = <div style={{ whiteSpace: "pre-wrap" }}>
-  {driveContent || "nothing in drive"}
-</div>;
-
-  const prompt = `Meeting: ${meetingTitle}\nDate: ${meetingDate}\n\nNotes:\n${notes}\n\nExtract all action items as JSON array.`;
-  const raw = await callClaude([{ role: "user", content: prompt }], system);
-  try {
-    const clean = raw.replace(/```json|```/g, "").trim();
-    return JSON.parse(clean);
-  } catch {
-    return [];
-  }
-}
+const AVATAR_COLORS = ["purple", "teal", "amber", "coral", "blue", "green"];
 
 // ─── Sub-components ───────────────────────────────────────────────────
 
@@ -59,9 +90,7 @@ function Avatar({ initials, color = "purple", size = 32 }) {
 }
 
 function StatusDot({ status }) {
-  const map = {
-    idle: "#888", running: "#3B82F6", done: "#22C55E", error: "#EF4444"
-  };
+  const map = { idle: "#888", running: "#3B82F6", done: "#22C55E", error: "#EF4444" };
   return (
     <span style={{
       display: "inline-block", width: 7, height: 7, borderRadius: "50%",
@@ -129,7 +158,7 @@ function TaskCard({ task, index, color }) {
       animation: `slideIn 0.3s ease both`,
       animationDelay: `${index * 80}ms`,
     }}>
-      <Avatar initials={task.ownerInitials || task.owner?.slice(0,2).toUpperCase()} color={color} size={34} />
+      <Avatar initials={task.ownerInitials || task.owner?.slice(0, 2).toUpperCase()} color={color} size={34} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: "#111", marginBottom: 5, lineHeight: 1.4 }}>{task.task}</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
@@ -138,7 +167,7 @@ function TaskCard({ task, index, color }) {
           </span>
           {task.deadline && task.deadline !== "No deadline" && (
             <span style={{ fontSize: 11.5, color: COLORS.amber.text, background: COLORS.amber.bg, borderRadius: 5, padding: "2px 7px" }}>
-              {task.deadline}
+              📅 {task.deadline}
             </span>
           )}
           <PriorityBadge priority={task.priority} />
@@ -161,7 +190,7 @@ function TaskCard({ task, index, color }) {
   );
 }
 
-function SlackMessage({ task, index, color }) {
+function SlackMessage({ task, index }) {
   return (
     <div style={{
       display: "flex", gap: 10, padding: "10px 0",
@@ -187,66 +216,57 @@ function SlackMessage({ task, index, color }) {
           {task.deadline && task.deadline !== "No deadline" && (
             <span style={{ color: COLORS.amber.text }}>⏰ Due: {task.deadline}</span>
           )}
-          {" "}<span style={{ color: COLORS.blue.text, cursor: "pointer" }}>→ ENG-{410 + index + 1}</span>
         </div>
       </div>
     </div>
   );
 }
 
+// ─── Drive helpers ─────────────────────────────────────────────────────
+async function fetchDriveFiles(accessToken, pageSize = 10) {
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files?orderBy=modifiedTime desc&pageSize=${pageSize}&fields=files(id,name,mimeType,modifiedTime)`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  const data = await res.json();
+  return data.files || [];
+}
+
+async function fetchFileText(accessToken, file) {
+  if (file.mimeType === "application/vnd.google-apps.document") {
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=text/plain`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    return await res.text();
+  }
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  return await res.text();
+}
+
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 // ─── Main App ─────────────────────────────────────────────────────────
 export default function App() {
- 
- 
- 
- 
- 
-  const fetchLatestFile = async (accessToken) => {
-  const filesRes = await fetch(
-    "https://www.googleapis.com/drive/v3/files?orderBy=modifiedTime desc&pageSize=1",
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    }
-  );
-
-  const filesData = await filesRes.json();
-
-  if (!filesData.files || filesData.files.length === 0) {
-    setDriveContent("nothing in drive");
-    setDriveFiles([]);
-    return;
-  }
-
-  const file = filesData.files[0];
-  setDriveFiles(filesData.files);
-
-  const contentRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    }
-  );
-
-  const text = await contentRes.text();
-  setDriveContent(text);
-};
-
-
-
-
   const [driveContent, setDriveContent] = useState("");
   const [driveFiles, setDriveFiles] = useState(null);
-  const [view, setView] = useState("pipeline"); // pipeline | run | history
+  const [selectedFileId, setSelectedFileId] = useState(null);
+  const [accessToken, setAccessToken] = useState(null);
+  const [view, setView] = useState("pipeline");
   const [authState, setAuthState] = useState({
     drive: false, calendar: false, linear: false, slack: false
   });
   const [meetingTitle, setMeetingTitle] = useState("Q2 Planning Sync");
   const [meetingDate, setMeetingDate] = useState("Apr 21, 2026");
-  const [notes, setNotes] = useState(driveContent);
-  const [stage, setStage] = useState("idle"); // idle | detecting | extracting | creating | notifying | done
+  const [notes, setNotes] = useState("");
+  const [stage, setStage] = useState("idle");
   const [tasks, setTasks] = useState([]);
   const [logs, setLogs] = useState([]);
-  const [activeTab, setActiveTab] = useState("tasks"); // tasks | slack | log
+  const [activeTab, setActiveTab] = useState("tasks");
+  const [driveError, setDriveError] = useState(null);
   const logRef = useRef(null);
 
   const allAuthed = Object.values(authState).every(Boolean);
@@ -259,6 +279,66 @@ export default function App() {
     setLogs(l => [...l, { ...entry, id: Date.now() + Math.random() }]);
   }
 
+  const loadDriveFiles = async (token) => {
+    setDriveError(null);
+    try {
+      const files = await fetchDriveFiles(token, 10);
+      setDriveFiles(files);
+      if (files.length > 0) {
+        setSelectedFileId(files[0].id);
+        const text = await fetchFileText(token, files[0]);
+        setDriveContent(text);
+        setNotes(text);
+      } else {
+        setDriveFiles([]);
+      }
+    } catch (err) {
+      console.error("Drive fetch failed:", err);
+      setDriveError("Failed to fetch Drive files. Token may have expired — reconnect Drive.");
+      setDriveFiles([]);
+    }
+  };
+
+  const onSelectFile = async (fileId) => {
+    setSelectedFileId(fileId);
+    if (!accessToken) return;
+    const file = driveFiles.find(f => f.id === fileId);
+    if (!file) return;
+    const text = await fetchFileText(accessToken, file);
+    setDriveContent(text);
+    setNotes(text);
+  };
+
+  const login = useGoogleLogin({
+    scope: "https://www.googleapis.com/auth/drive.readonly",
+    onSuccess: async (tokenResponse) => {
+      const token = tokenResponse.access_token;
+      setAccessToken(token);
+      localStorage.setItem("drive_token", token);
+      localStorage.setItem("drive_connected", "true");
+      setAuthState(p => ({ ...p, drive: true }));
+      await loadDriveFiles(token);
+    },
+    onError: (err) => {
+      console.error("OAuth error:", err);
+      setDriveError("Google login failed.");
+    },
+  });
+
+  useEffect(() => {
+    const token = localStorage.getItem("drive_token");
+    const connected = localStorage.getItem("drive_connected");
+    if (token && connected) {
+      setAccessToken(token);
+      setAuthState(p => ({ ...p, drive: true }));
+      loadDriveFiles(token);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [logs]);
+
   async function runPipeline() {
     if (!notes.trim()) return;
     setTasks([]);
@@ -266,89 +346,58 @@ export default function App() {
     setStage("detecting");
 
     addLog({ icon: "📁", text: "detect_post_meeting_doc", sub: `Scanning Drive for docs linked to "${meetingTitle}"...`, status: "running" });
-    await delay(900);
-    addLog({ icon: "✅", text: "Doc detected", sub: "Meeting notes — Q2 Planning Sync.gdoc (updated 4 min after event)", status: "done" });
+    await delay(800);
+    addLog({ icon: "✅", text: "Doc loaded", sub: selectedFileId ? `File: ${driveFiles?.find(f => f.id === selectedFileId)?.name || selectedFileId}` : "Using pasted notes", status: "done" });
 
     setStage("extracting");
-    addLog({ icon: "🧠", text: "extract_action_items", sub: "Parsing notes with Claude — identifying owners, tasks, deadlines...", status: "running" });
+    addLog({ icon: "🧠", text: "extract_action_items", sub: "Calling OpenRouter (Gemma) — extracting tasks, owners, deadlines...", status: "running" });
 
     let extracted = [];
     try {
-      extracted = await extractActionItems(notes, meetingTitle, meetingDate);
-    } catch {
-      extracted = [];
+      extracted = await extractTasksWithAI(notes);
+      if (extracted.length > 0) {
+        addLog({ icon: "✅", text: `${extracted.length} action items extracted`, sub: `Owners: ${[...new Set(extracted.map(t => t.owner?.split(" ")[0]))].join(", ")}`, status: "done" });
+      }
+    } catch (err) {
+      console.error("AI extraction failed:", err);
+      addLog({ icon: "❌", text: "Extraction failed", sub: err.message, status: "error" });
     }
 
     if (!extracted.length) {
       extracted = [
-        { task: "Finalize mobile design specs", owner: "Priya K", ownerInitials: "PK", deadline: "Apr 25", priority: "high" },
-        { task: "Fix auth timeout bug", owner: "James M", ownerInitials: "JM", deadline: "End of sprint", priority: "high" },
-        { task: "Schedule customer interviews", owner: "Lin C", ownerInitials: "LC", deadline: "Next week", priority: "medium" },
-        { task: "Update pricing page copy to staging", owner: "Arjun S", ownerInitials: "AS", deadline: "Apr 24", priority: "medium" },
-        { task: "Draft Q2 OKR summary doc", owner: "Maya R", ownerInitials: "MR", deadline: "Apr 28", priority: "low" },
+        { task: "Finalize mobile design specs", owner: "Priya K", deadline: "Apr 25", priority: "high" },
+        { task: "Fix auth timeout bug", owner: "James M", deadline: "End of sprint", priority: "high" },
+        { task: "Schedule customer interviews", owner: "Lin C", deadline: "Next week", priority: "medium" },
+        { task: "Update pricing page copy", owner: "Arjun S", deadline: "Apr 24", priority: "medium" },
+        { task: "Draft Q2 OKR summary doc", owner: "Maya R", deadline: "Apr 28", priority: "low" },
       ];
+      addLog({ icon: "⚠️", text: "Using fallback demo tasks", sub: "AI returned empty — check console for details", status: "done" });
     }
 
-    addLog({ icon: "✅", text: `${extracted.length} action items extracted`, sub: `Owners: ${[...new Set(extracted.map(t => t.owner?.split(" ")[0]))].join(", ")}`, status: "done" });
     setTasks(extracted);
 
     setStage("creating");
     addLog({ icon: "⚡", text: "create_linear_tasks", sub: `Creating ${extracted.length} tickets in Linear...`, status: "running" });
-    await delay(1100);
+    await delay(1000);
     extracted.forEach((t, i) => {
-      addLog({ icon: "🎫", text: `ENG-${411 + i} created`, sub: `${t.task} → assigned to ${t.owner}`, status: "done" });
+      addLog({ icon: "🎫", text: `ENG-${411 + i} created`, sub: `${t.task} → ${t.owner}`, status: "done" });
     });
 
     setStage("notifying");
-    addLog({ icon: "💬", text: "notify_assignees", sub: `Sending Slack DMs to ${[...new Set(extracted.map(t => t.owner))].length} team members...`, status: "running" });
-    await delay(900);
+    addLog({ icon: "💬", text: "notify_assignees", sub: `Sending Slack DMs to ${[...new Set(extracted.map(t => t.owner))].length} members...`, status: "running" });
+    await delay(800);
     [...new Set(extracted.map(t => t.owner))].forEach(owner => {
       addLog({ icon: "✉️", text: `DM sent to @${owner?.split(" ")[0]?.toLowerCase()}`, sub: `${extracted.filter(t => t.owner === owner).length} task(s) included`, status: "done" });
     });
 
     setStage("done");
-    addLog({ icon: "🎉", text: "Pipeline complete", sub: `${extracted.length} tasks created · ${[...new Set(extracted.map(t => t.owner))].length} members notified`, status: "done" });
+    addLog({ icon: "🎉", text: "Pipeline complete", sub: `${extracted.length} tasks · ${[...new Set(extracted.map(t => t.owner))].length} members notified`, status: "done" });
   }
-
-  useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [logs]);
-
-
-
-useEffect(() => {
-  const token = localStorage.getItem("drive_token");
-  const connected = localStorage.getItem("drive_connected");
-
-  if (token && connected) {
-    setAuthState(p => ({ ...p, drive: true }));
-    fetchLatestFile(token);
-  }
-}, []);
-
-
 
   const stageLabel = {
     idle: "Ready", detecting: "Detecting doc…", extracting: "Extracting tasks…",
     creating: "Creating tickets…", notifying: "Notifying team…", done: "Complete",
   }[stage];
-
-
-const login = useGoogleLogin({
-  scope: "https://www.googleapis.com/auth/drive.readonly",
-onSuccess: async (tokenResponse) => {
-  const accessToken = tokenResponse.access_token;
-
-  localStorage.setItem("drive_token", accessToken);
-  localStorage.setItem("drive_connected", "true");
-
-  await fetchLatestFile(accessToken);
-
-  setAuthState(p => ({ ...p, drive: true }));
-},
-});
-
-
 
   return (
     <div style={{ fontFamily: "'DM Sans', 'Helvetica Neue', sans-serif", minHeight: "100vh", background: "#f9f9f7", color: "#1a1a1a" }}>
@@ -356,7 +405,6 @@ onSuccess: async (tokenResponse) => {
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap');
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
         @keyframes slideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes spin { to{transform:rotate(360deg)} }
         * { box-sizing: border-box; }
         textarea { resize: vertical; }
         ::-webkit-scrollbar { width: 4px; }
@@ -379,7 +427,7 @@ onSuccess: async (tokenResponse) => {
         </div>
 
         <div style={{ display: "flex", gap: 2, marginLeft: 16 }}>
-          {["pipeline","run","history"].map(v => (
+          {["pipeline", "run", "history"].map(v => (
             <button key={v} onClick={() => setView(v)} style={{
               padding: "5px 13px", borderRadius: 7, border: "none", cursor: "pointer",
               background: view === v ? "#1a1a1a" : "transparent",
@@ -392,20 +440,12 @@ onSuccess: async (tokenResponse) => {
 
         <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
           {[
-            { key: "drive",    label: "Drive",    icon: "📁" },
+            { key: "drive", label: "Drive", icon: "📁" },
             { key: "calendar", label: "Calendar", icon: "📅" },
-            { key: "linear",   label: "Linear",   icon: "⚡" },
-            { key: "slack",    label: "Slack",    icon: "💬" },
+            { key: "linear", label: "Linear", icon: "⚡" },
+            { key: "slack", label: "Slack", icon: "💬" },
           ].map(a => (
-            <div key={a.key}
-            
-            
-            onClick={() => {
-  if (a.key === "drive") login();
-  else toggleAuth(a.key);
-}} 
-
-style={{ cursor: "pointer" }}>
+            <div key={a.key} onClick={() => a.key === "drive" ? login() : toggleAuth(a.key)} style={{ cursor: "pointer" }}>
               <AuthBadge label={a.label} icon={a.icon} connected={authState[a.key]} />
             </div>
           ))}
@@ -419,17 +459,16 @@ style={{ cursor: "pointer" }}>
           <div style={{ animation: "slideIn 0.3s ease" }}>
             <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.03em", marginBottom: 6 }}>Meeting → Tasks, automatically.</h1>
             <p style={{ fontSize: 14, color: "#666", marginBottom: 28, maxWidth: 520 }}>
-              Watches Drive for post-meeting docs, extracts action items with AI, creates Linear tickets, and DMs every assignee on Slack — without anyone lifting a finger.
+              Watches Drive for post-meeting docs, extracts action items with AI, creates Linear tickets, and DMs every assignee on Slack.
             </p>
 
-            {/* Pipeline steps */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 28 }}>
               {[
-                { num: "01", icon: "📁", tool: "detect_post_meeting_doc", title: "Detect doc", desc: "Watches Google Drive for docs updated within 30 min of a calendar event ending.", trigger: "Event-driven" },
-                { num: "02", icon: "🧠", tool: "extract_action_items", title: "Extract tasks", desc: "Claude parses freeform notes to identify action items, owners, and deadlines.", trigger: "Claude API" },
+                { num: "01", icon: "📁", tool: "detect_post_meeting_doc", title: "Detect doc", desc: "Fetches your latest Google Drive docs — select which one to process.", trigger: "Google Drive API" },
+                { num: "02", icon: "🧠", tool: "extract_action_items", title: "Extract tasks", desc: "OpenRouter (Gemma) parses freeform notes to identify tasks, owners, and deadlines.", trigger: "OpenRouter API" },
                 { num: "03", icon: "⚡", tool: "create_linear_tasks", title: "Create tickets", desc: "One Linear issue per action item, assigned to the right team member with priority.", trigger: "Linear API" },
                 { num: "04", icon: "💬", tool: "notify_assignees", title: "DM assignees", desc: "Each person gets a Slack DM with their tasks, the meeting name, and deadline.", trigger: "Slack API" },
-              ].map((s, i) => (
+              ].map((s) => (
                 <div key={s.num} style={{
                   background: "#fff", border: "0.5px solid #e8e8e8", borderRadius: 12,
                   padding: "16px 18px", position: "relative", overflow: "hidden",
@@ -444,7 +483,6 @@ style={{ cursor: "pointer" }}>
               ))}
             </div>
 
-            {/* Auth setup callout */}
             {!allAuthed && (
               <div style={{
                 background: "#FAEEDA", border: "0.5px solid #EF9F27", borderRadius: 10,
@@ -453,9 +491,9 @@ style={{ cursor: "pointer" }}>
               }}>
                 <span>⚠️</span>
                 <div>
-                  Connect all 4 integrations in the top bar to run the pipeline.
-                  {" "}<strong>{Object.values(authState).filter(Boolean).length}/4 connected.</strong>
-                  {" "}Click any badge to toggle (simulated for demo).
+                  Connect all 4 integrations in the top bar.{" "}
+                  <strong>{Object.values(authState).filter(Boolean).length}/4 connected.</strong>
+                  {" "}Click the Drive badge to authenticate with Google.
                 </div>
               </div>
             )}
@@ -463,7 +501,7 @@ style={{ cursor: "pointer" }}>
             <button onClick={() => setView("run")} style={{
               padding: "11px 24px", borderRadius: 9, border: "none", cursor: "pointer",
               background: "#1a1a1a", color: "#fff", fontWeight: 600, fontSize: 14,
-              fontFamily: "inherit", letterSpacing: "-0.01em", transition: "opacity 0.15s",
+              fontFamily: "inherit", letterSpacing: "-0.01em",
             }}>Run pipeline →</button>
           </div>
         )}
@@ -471,32 +509,44 @@ style={{ cursor: "pointer" }}>
         {/* ── RUN VIEW ── */}
         {view === "run" && (
           <div style={{ animation: "slideIn 0.3s ease" }}>
-           
 
-{!driveContent ? (
-  <p>nothing in drive</p>
-) : (
-  <div style={{ whiteSpace: "pre-wrap" }}>
-    {driveContent}
-  </div>
-)}
+            {/* Drive file selector */}
+            {authState.drive && (
+              <div style={{ background: "#fff", border: "0.5px solid #e8e8e8", borderRadius: 10, padding: "14px 16px", marginBottom: 18 }}>
+                <div style={{ fontSize: 12, color: "#888", fontWeight: 500, marginBottom: 8 }}>📁 Google Drive — select a document to load</div>
+                {driveFiles === null ? (
+                  <div style={{ fontSize: 13, color: "#aaa" }}>Loading Drive files…</div>
+                ) : driveFiles.length === 0 ? (
+                  <div style={{ fontSize: 13, color: "#aaa" }}>No files found in Drive.</div>
+                ) : (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {driveFiles.map(file => (
+                      <button key={file.id} onClick={() => onSelectFile(file.id)} style={{
+                        padding: "5px 11px", borderRadius: 7, cursor: "pointer", fontSize: 12.5,
+                        border: `0.5px solid ${selectedFileId === file.id ? "#1a1a1a" : "#e0e0e0"}`,
+                        background: selectedFileId === file.id ? "#1a1a1a" : "#fafafa",
+                        color: selectedFileId === file.id ? "#fff" : "#555",
+                        fontFamily: "inherit", fontWeight: 500, transition: "all 0.15s",
+                      }}>
+                        {file.name.length > 32 ? file.name.slice(0, 32) + "…" : file.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {driveError && <div style={{ color: "#A32D2D", fontSize: 12, marginTop: 8 }}>⚠️ {driveError}</div>}
+              </div>
+            )}
 
-
-{driveFiles === null ? (
-  <p>Loading...</p>
-) : driveFiles.length === 0 ? (
-  <p>No files found</p>
-) : (
-  <div style={{ marginTop: 20 }}>
-    <h3>Drive Files</h3>
-    {driveFiles.map(file => (
-      <div key={file.id}>{file.name}</div>
-    ))}
-  </div>
-)}
-
-
-
+            {!authState.drive && (
+              <div style={{
+                background: "#E6F1FB", border: "0.5px solid #85B7EB", borderRadius: 10,
+                padding: "13px 16px", marginBottom: 18, fontSize: 13, color: "#0C447C",
+                display: "flex", alignItems: "center", gap: 10,
+              }}>
+                <span>ℹ️</span>
+                <div>Connect Google Drive in the top bar to auto-load docs, or paste your meeting notes below.</div>
+              </div>
+            )}
 
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 22 }}>
               <h2 style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em", flex: 1 }}>Run pipeline</h2>
@@ -530,8 +580,11 @@ style={{ cursor: "pointer" }}>
             </div>
 
             <div style={{ marginBottom: 14 }}>
-              <label style={{ fontSize: 12, color: "#888", display: "block", marginBottom: 5, fontWeight: 500 }}>Meeting notes</label>
+              <label style={{ fontSize: 12, color: "#888", display: "block", marginBottom: 5, fontWeight: 500 }}>
+                Meeting notes {authState.drive && driveContent ? "(loaded from Drive — editable)" : "(paste here)"}
+              </label>
               <textarea value={notes} onChange={e => setNotes(e.target.value)}
+                placeholder="Paste your meeting notes here, or connect Drive to auto-load…"
                 rows={10} style={{
                   width: "100%", padding: "11px 14px", borderRadius: 8,
                   border: "0.5px solid #e0e0e0", fontSize: 12.5, fontFamily: "'DM Mono', monospace",
@@ -540,7 +593,8 @@ style={{ cursor: "pointer" }}>
             </div>
 
             <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
-              <button onClick={runPipeline} disabled={stage !== "idle" && stage !== "done"}
+              <button onClick={runPipeline}
+                disabled={stage !== "idle" && stage !== "done"}
                 style={{
                   padding: "10px 22px", borderRadius: 8, border: "none", cursor: "pointer",
                   background: "#1a1a1a", color: "#fff", fontWeight: 600, fontSize: 13.5,
@@ -559,11 +613,10 @@ style={{ cursor: "pointer" }}>
               )}
             </div>
 
-            {/* Results area */}
             {(tasks.length > 0 || logs.length > 0) && (
               <div style={{ background: "#fff", border: "0.5px solid #e8e8e8", borderRadius: 12, overflow: "hidden" }}>
                 <div style={{ display: "flex", borderBottom: "0.5px solid #e8e8e8", background: "#fafafa" }}>
-                  {["tasks","slack","log"].map(t => (
+                  {["tasks", "slack", "log"].map(t => (
                     <button key={t} onClick={() => setActiveTab(t)} style={{
                       padding: "10px 18px", border: "none", cursor: "pointer", fontSize: 12.5, fontWeight: 500,
                       background: activeTab === t ? "#fff" : "transparent",
@@ -590,7 +643,7 @@ style={{ cursor: "pointer" }}>
                     <div>
                       {tasks.length === 0
                         ? <div style={{ color: "#aaa", fontSize: 13, textAlign: "center", padding: "24px 0" }}>Waiting for tasks…</div>
-                        : tasks.map((t, i) => <SlackMessage key={i} task={t} index={i} color={AVATAR_COLORS[i % AVATAR_COLORS.length]} />)
+                        : tasks.map((t, i) => <SlackMessage key={i} task={t} index={i} />)
                       }
                     </div>
                   )}
@@ -634,12 +687,8 @@ style={{ cursor: "pointer" }}>
                   <div style={{ fontSize: 12, color: "#888" }}>{r.date}</div>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <span style={{ fontSize: 11.5, background: "#f4f4f4", padding: "3px 9px", borderRadius: 99, color: "#555" }}>
-                    {r.tasks} tasks
-                  </span>
-                  <span style={{ fontSize: 11.5, background: "#E1F5EE", padding: "3px 9px", borderRadius: 99, color: "#085041" }}>
-                    {r.members} notified
-                  </span>
+                  <span style={{ fontSize: 11.5, background: "#f4f4f4", padding: "3px 9px", borderRadius: 99, color: "#555" }}>{r.tasks} tasks</span>
+                  <span style={{ fontSize: 11.5, background: "#E1F5EE", padding: "3px 9px", borderRadius: 99, color: "#085041" }}>{r.members} notified</span>
                   <span style={{ fontSize: 11.5, color: "#bbb" }}>{r.time}</span>
                 </div>
               </div>
@@ -662,9 +711,8 @@ style={{ cursor: "pointer" }}>
             </div>
           </div>
         )}
+
       </div>
     </div>
   );
 }
-
-function delay(ms) { return new Promise(r => setTimeout(r, ms)); }

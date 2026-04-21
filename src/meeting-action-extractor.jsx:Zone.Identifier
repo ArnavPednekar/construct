@@ -1,0 +1,4 @@
+[ZoneTransfer]
+ZoneId=3
+ReferrerUrl=https://claude.ai/chat/4ab8b6e9-0a9a-45fd-aa5b-7007e214d106
+HostUrl=https://claude.ai/api/organizations/221f1cd4-54e4-4ac4-9772-c7a129bfd298/conversations/4ab8b6e9-0a9a-45fd-aa5b-7007e214d106/wiggle/download-file?path=%2Fmnt%2Fuser-data%2Foutputs%2Fmeeting-action-extractor.jsx
