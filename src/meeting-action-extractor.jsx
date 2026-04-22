@@ -560,18 +560,22 @@ export default function App() {
       const text = await fetchFileText(accessToken, file);
       setNotes(text);
       const fileDateStr = file.createdTime || file.modifiedTime;
-      setMeetingDate(fileDateStr
+      const dateStr = fileDateStr
         ? new Date(fileDateStr).toISOString().split("T")[0]
-        : new Date().toISOString().split("T")[0]
-      );
+        : new Date().toISOString().split("T")[0];
+      setMeetingDate(dateStr);
+      setLoadingFile(false);
+      runPipeline(text, dateStr);
+      return;
     } catch (e) {
       setError("Could not read this file.");
     }
     setLoadingFile(false);
   };
 
-  const runPipeline = async () => {
-    if (!notes.trim()) return;
+  const runPipeline = async (overrideText, overrideDate) => {
+    const textToUse = overrideText ?? notes;
+    if (!textToUse.trim()) return;
     setStage("running");
     setError("");
     setTasks([]);
@@ -582,11 +586,10 @@ export default function App() {
 
     try {
       setStatusMsg("Reading meeting notes…");
-      const fallbackDate = meetingDate && meetingDate.trim()
-        ? meetingDate
-        : new Date().toISOString().split("T")[0];
+      const fallbackDate = (overrideDate ?? meetingDate ?? "").trim()
+        || new Date().toISOString().split("T")[0];
       setStatusMsg("AI is analysing the meeting…");
-      const result = await analyzeMeeting(notes, fallbackDate);
+      const result = await analyzeMeeting(textToUse, fallbackDate);
       setMeetingTitle(result.title);
       setMeetingDate(result.date || fallbackDate);
       setMeetingSummary(result.summary);
