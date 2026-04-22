@@ -13,6 +13,7 @@
     "@react-oauth/google": "^0.13.5",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "mammoth": "^1.8.0",
     "node-fetch": "^3.3.2",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"

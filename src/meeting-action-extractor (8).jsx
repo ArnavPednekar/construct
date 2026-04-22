@@ -25,7 +25,7 @@ The JSON must have exactly these keys:
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
-      "Authorization": "Bearer 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",
+      "Authorization": "Bearer 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",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -199,8 +199,8 @@ async function deleteCalendarEvent(token, eventId) {
 
 
 // ─── Slack: post task to #tasks ───────────────────────────────────────
-const SLACK_TOKEN = "";
-const SLACK_CHANNEL = "#tasks";
+const SLACK_TOKEN = "xoxb-10964551440198-10994949093600-azlf1U2BeixMeN36eear9Ei1";
+const SLACK_CHANNEL = "tasks";
 
 async function postToSlack(task, meetingTitle) {
   const priorityEmoji = { high: "🔴", medium: "🟡", low: "🟢" }[task.priority?.toLowerCase()] || "⚪";
@@ -211,10 +211,10 @@ async function postToSlack(task, meetingTitle) {
     `👤 Assigned to: ${task.owner}`,
     `📌 From: ${meetingTitle}`,
   ].join("\n");
-  await fetch("https://slack.com/api/chat.postMessage", {
+  await fetch("https://slack-proxy.shivang2021123.workers.dev", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${SLACK_TOKEN}`,
+
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ channel: SLACK_CHANNEL, text }),
